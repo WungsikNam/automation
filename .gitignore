@@ -31,3 +31,6 @@ temp/
 # Credentials
 credentials/
 secrets/
+
+# Local setup with real tokens (DO NOT COMMIT)
+LOCAL_SETUP.md
