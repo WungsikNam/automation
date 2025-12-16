@@ -1,0 +1,282 @@
+{
+  "name": "Discord Ticket Creation Flow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "discord-interaction",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Discord Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "discord-interaction"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.type }}",
+              "value2": 2
+            }
+          ]
+        }
+      },
+      "id": "if-interaction-type",
+      "name": "Check Interaction Type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"type\": 9,\n  \"data\": {\n    \"title\": \"티켓 생성\",\n    \"custom_id\": \"ticket_modal\",\n    \"components\": [\n      {\n        \"type\": 1,\n        \"components\": [{\n          \"type\": 4,\n          \"custom_id\": \"ticket_type\",\n          \"label\": \"Ticket Type\",\n          \"style\": 1,\n          \"placeholder\": \"예: Bug, Feature, Task\",\n          \"required\": true\n        }]\n      },\n      {\n        \"type\": 1,\n        \"components\": [{\n          \"type\": 4,\n          \"custom_id\": \"ticket_title\",\n          \"label\": \"Ticket Title\",\n          \"style\": 1,\n          \"placeholder\": \"티켓 제목을 입력하세요\",\n          \"required\": true\n        }]\n      },\n      {\n        \"type\": 1,\n        \"components\": [{\n          \"type\": 4,\n          \"custom_id\": \"ticket_description\",\n          \"label\": \"Ticket Description\",\n          \"style\": 2,\n          \"placeholder\": \"티켓 상세 내용을 입력하세요\",\n          \"required\": true\n        }]\n      },\n      {\n        \"type\": 1,\n        \"components\": [{\n          \"type\": 4,\n          \"custom_id\": \"assignee\",\n          \"label\": \"Assignee\",\n          \"style\": 1,\n          \"placeholder\": \"담당자 이름\",\n          \"required\": true\n        }]\n      },\n      {\n        \"type\": 1,\n        \"components\": [{\n          \"type\": 4,\n          \"custom_id\": \"dates\",\n          \"label\": \"Start Date ~ Due Date\",\n          \"style\": 1,\n          \"placeholder\": \"예: 2024-01-01 ~ 2024-01-15\",\n          \"required\": true\n        }]\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "id": "respond-modal",
+      "name": "Respond with Modal",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [650, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.item.json;\nconst components = data.data.components;\n\n// Extract form values\nconst ticketType = components[0].components[0].value;\nconst ticketTitle = components[1].components[0].value;\nconst ticketDescription = components[2].components[0].value;\nconst assignee = components[3].components[0].value;\nconst dates = components[4].components[0].value;\n\n// Parse dates\nconst [startDate, dueDate] = dates.split('~').map(d => d.trim());\n\n// Get user info\nconst requesterId = data.member.user.id;\nconst requesterName = data.member.user.username;\n\n// Generate unique request ID\nconst requestId = Date.now().toString();\n\nreturn {\n  json: {\n    request_id: requestId,\n    ticket_type: ticketType,\n    ticket_title: ticketTitle,\n    ticket_description: ticketDescription,\n    assignee: assignee,\n    start_date: startDate,\n    due_date: dueDate,\n    story_point: '',\n    requester_id: requesterId,\n    requester_name: requesterName,\n    status: 'pending',\n    jira_key: '',\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "parse-modal-data",
+      "name": "Parse Modal Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"type\": 4,\n  \"data\": {\n    \"content\": \"✅ 티켓 요청이 접수되었습니다. PM 승인을 기다려주세요.\",\n    \"flags\": 64\n  }\n}",
+        "options": {}
+      },
+      "id": "respond-confirmation",
+      "name": "Respond Confirmation",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const PM_USER_ID = \"1258331291846185033\";\n\nreturn {\n  json: {\n    ...items[0].json,\n    pmUserId: PM_USER_ID\n  }\n};"
+      },
+      "id": "set-pm-user-id",
+      "name": "Set PM User ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ticket_requests",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "request_id": "={{ $json.request_id }}",
+            "ticket_type": "={{ $json.ticket_type }}",
+            "ticket_title": "={{ $json.ticket_title }}",
+            "ticket_description": "={{ $json.ticket_description }}",
+            "assignee": "={{ $json.assignee }}",
+            "start_date": "={{ $json.start_date }}",
+            "due_date": "={{ $json.due_date }}",
+            "story_point": "={{ $json.story_point }}",
+            "requester_id": "={{ $json.requester_id }}",
+            "requester_name": "={{ $json.requester_name }}",
+            "status": "={{ $json.status }}",
+            "jira_key": "={{ $json.jira_key }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "save-to-sheets",
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1250, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets - Ticket Master"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/users/@me/channels",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "recipient_id",
+              "value": "={{ $json.pmUserId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-dm-channel",
+      "name": "Create PM DM Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ $json.id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "=🎫 **새로운 티켓 승인 요청**\n\n**요청자:** {{ $('Parse Modal Data').item.json.requester_name }}\n**Type:** {{ $('Parse Modal Data').item.json.ticket_type }}\n**Title:** {{ $('Parse Modal Data').item.json.ticket_title }}\n**Description:** {{ $('Parse Modal Data').item.json.ticket_description }}\n**Assignee:** {{ $('Parse Modal Data').item.json.assignee }}\n**기간:** {{ $('Parse Modal Data').item.json.start_date }} ~ {{ $('Parse Modal Data').item.json.due_date }}"
+            },
+            {
+              "name": "components",
+              "value": "=[{\n  \"type\": 1,\n  \"components\": [\n    {\n      \"type\": 2,\n      \"label\": \"승인\",\n      \"style\": 3,\n      \"custom_id\": \"approve_ticket_{{ $('Parse Modal Data').item.json.request_id }}\"\n    },\n    {\n      \"type\": 2,\n      \"label\": \"거부\",\n      \"style\": 4,\n      \"custom_id\": \"reject_ticket_{{ $('Parse Modal Data').item.json.request_id }}\"\n    }\n  ]\n}]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-approval-request",
+      "name": "Send Approval Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1650, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot Auth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Discord Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check Interaction Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Interaction Type": {
+      "main": [
+        [
+          {
+            "node": "Respond with Modal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Modal Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Modal Data": {
+      "main": [
+        [
+          {
+            "node": "Respond Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Set PM User ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set PM User ID": {
+      "main": [
+        [
+          {
+            "node": "Save to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Create PM DM Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create PM DM Channel": {
+      "main": [
+        [
+          {
+            "node": "Send Approval Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-12-16T00:00:00.000Z",
+  "versionId": "1"
+}

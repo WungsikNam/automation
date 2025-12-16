@@ -1,0 +1,510 @@
+{
+  "name": "Discord Ticket Approval Flow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ticket-approval",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-approval",
+      "name": "Approval Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "ticket-approval"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.item.json;\nconst customId = data.data.custom_id;\nconst userId = data.member.user.id;\nconst username = data.member.user.username;\n\n// Extract action and request_id\nconst [action, _, requestId] = customId.split('_');\n\nreturn {\n  json: {\n    action,\n    requestId,\n    userId,\n    username,\n    messageId: data.message.id,\n    channelId: data.channel_id\n  }\n};"
+      },
+      "id": "parse-button-click",
+      "name": "Parse Button Click",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ticket_requests",
+          "mode": "name"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "column": "request_id",
+              "condition": "equals",
+              "value": "={{ $json.requestId }}"
+            }
+          ],
+          "combineOperation": "AND"
+        },
+        "options": {
+          "returnAllMatches": false
+        }
+      },
+      "id": "lookup-ticket",
+      "name": "Lookup Ticket in Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [650, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets - Ticket Master"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Parse Button Click').item.json.action }}",
+              "value2": "approve"
+            }
+          ]
+        }
+      },
+      "id": "check-action",
+      "name": "Check Action",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "resource": "issue",
+        "operation": "create",
+        "project": {
+          "__rl": true,
+          "value": "YOUR_PROJECT_KEY",
+          "mode": "name"
+        },
+        "issueType": {
+          "__rl": true,
+          "value": "={{ $json.ticket_type }}",
+          "mode": "name"
+        },
+        "summary": "={{ $json.ticket_title }}",
+        "additionalFields": {
+          "description": "={{ $json.ticket_description }}",
+          "assignee": {
+            "__rl": true,
+            "value": "={{ $json.assignee }}",
+            "mode": "name"
+          },
+          "dueDate": "={{ $json.due_date }}"
+        }
+      },
+      "id": "create-jira-ticket",
+      "name": "Create JIRA Ticket",
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [1050, 200],
+      "credentials": {
+        "jiraCloudApi": {
+          "id": "YOUR_JIRA_CREDENTIAL_ID",
+          "name": "JIRA Cloud API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  json: {\n    ...items[0].json,\n    jira_key: $('Create JIRA Ticket').item.json.key,\n    jira_id: $('Create JIRA Ticket').item.json.id\n  }\n};"
+      },
+      "id": "prepare-approved-update",
+      "name": "Prepare Approved Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ticket_requests",
+          "mode": "name"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "column": "request_id",
+              "condition": "equals",
+              "value": "={{ $json.request_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "approved",
+            "jira_key": "={{ $json.jira_key }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "update-approved-status",
+      "name": "Update Approved Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1450, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets - Ticket Master"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/users/@me/channels",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "recipient_id",
+              "value": "={{ $('Lookup Ticket in Sheets').item.json.requester_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-requester-dm",
+      "name": "Create Requester DM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1650, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ $json.id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "=✅ **티켓이 승인되었습니다!**\n\n**Title:** {{ $('Lookup Ticket in Sheets').item.json.ticket_title }}\n**JIRA Key:** {{ $('Prepare Approved Update').item.json.jira_key }}\n**Link:** https://YOUR_DOMAIN.atlassian.net/browse/{{ $('Prepare Approved Update').item.json.jira_key }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "notify-requester-approved",
+      "name": "Notify Requester Approved",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1850, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"type\": 4,\n  \"data\": {\n    \"content\": \"✅ 티켓이 승인되어 JIRA에 생성되었습니다.\",\n    \"flags\": 64\n  }\n}",
+        "options": {}
+      },
+      "id": "respond-approved",
+      "name": "Respond Approved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2050, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ticket_requests",
+          "mode": "name"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "column": "request_id",
+              "condition": "equals",
+              "value": "={{ $('Lookup Ticket in Sheets').item.json.request_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "rejected"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "update-rejected-status",
+      "name": "Update Rejected Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1050, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets - Ticket Master"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/users/@me/channels",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "recipient_id",
+              "value": "={{ $('Lookup Ticket in Sheets').item.json.requester_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-requester-dm-reject",
+      "name": "Create Requester DM (Reject)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ $json.id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "=❌ **티켓이 거부되었습니다**\n\n**Title:** {{ $('Lookup Ticket in Sheets').item.json.ticket_title }}\n**사유:** PM이 검토 후 거부하였습니다."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "notify-requester-rejected",
+      "name": "Notify Requester Rejected",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"type\": 4,\n  \"data\": {\n    \"content\": \"❌ 티켓이 거부되었습니다.\",\n    \"flags\": 64\n  }\n}",
+        "options": {}
+      },
+      "id": "respond-rejected",
+      "name": "Respond Rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1650, 400]
+    }
+  ],
+  "connections": {
+    "Approval Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Button Click",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Button Click": {
+      "main": [
+        [
+          {
+            "node": "Lookup Ticket in Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Ticket in Sheets": {
+      "main": [
+        [
+          {
+            "node": "Check Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Action": {
+      "main": [
+        [
+          {
+            "node": "Create JIRA Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Rejected Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create JIRA Ticket": {
+      "main": [
+        [
+          {
+            "node": "Prepare Approved Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Approved Update": {
+      "main": [
+        [
+          {
+            "node": "Update Approved Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Approved Status": {
+      "main": [
+        [
+          {
+            "node": "Create Requester DM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Requester DM": {
+      "main": [
+        [
+          {
+            "node": "Notify Requester Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Requester Approved": {
+      "main": [
+        [
+          {
+            "node": "Respond Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Rejected Status": {
+      "main": [
+        [
+          {
+            "node": "Create Requester DM (Reject)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Requester DM (Reject)": {
+      "main": [
+        [
+          {
+            "node": "Notify Requester Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Requester Rejected": {
+      "main": [
+        [
+          {
+            "node": "Respond Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-12-16T00:00:00.000Z",
+  "versionId": "1"
+}

@@ -1,0 +1,242 @@
+{
+  "name": "Discord Ticket Reminder Flow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ticket_requests",
+          "mode": "name"
+        },
+        "options": {
+          "dataStartRow": 2
+        }
+      },
+      "id": "read-all-tickets",
+      "name": "Read All Tickets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [450, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets - Ticket Master"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter pending tickets older than 2 hours\nconst twoHoursAgo = Date.now() - (2 * 60 * 60 * 1000);\n\nconst pendingTickets = items.filter(item => {\n  const status = item.json.status;\n  const requestId = item.json.request_id;\n  \n  // Check if status is pending\n  if (status !== 'pending') return false;\n  \n  // Check if older than 2 hours (request_id is timestamp)\n  const createdTime = parseInt(requestId);\n  return createdTime < twoHoursAgo;\n});\n\nreturn pendingTickets;"
+      },
+      "id": "filter-pending",
+      "name": "Filter Pending Tickets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $input.all().length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "check-pending-exists",
+      "name": "Check Pending Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const PM_USER_ID = \"1258331291846185033\";\n\nconst pendingTickets = $input.all();\nconst ticketList = pendingTickets.map(ticket => {\n  const data = ticket.json;\n  const createdTime = parseInt(data.request_id);\n  const timePending = Math.floor((Date.now() - createdTime) / (1000 * 60 * 60));\n  return `• **${data.ticket_title}** (${timePending}시간 전 요청)`;\n}).join('\\n');\n\nreturn {\n  json: {\n    pmUserId: PM_USER_ID,\n    ticketCount: pendingTickets.length,\n    ticketList,\n    message: `⏰ **승인 대기 중인 티켓이 ${pendingTickets.length}개 있습니다**\\n\\n${ticketList}\\n\\n확인 부탁드립니다!`\n  }\n};"
+      },
+      "id": "prepare-reminder",
+      "name": "Prepare Reminder Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/users/@me/channels",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "recipient_id",
+              "value": "={{ $json.pmUserId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-pm-dm",
+      "name": "Create PM DM Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ $json.id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $('Prepare Reminder Message').item.json.message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-reminder",
+      "name": "Send Reminder to PM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ { \"status\": \"No pending tickets\" } }}",
+        "options": {}
+      },
+      "id": "no-pending",
+      "name": "No Pending Tickets",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [1050, 400]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read All Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read All Tickets": {
+      "main": [
+        [
+          {
+            "node": "Filter Pending Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Pending Tickets": {
+      "main": [
+        [
+          {
+            "node": "Check Pending Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Pending Exists": {
+      "main": [
+        [
+          {
+            "node": "Prepare Reminder Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Pending Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Reminder Message": {
+      "main": [
+        [
+          {
+            "node": "Create PM DM Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create PM DM Channel": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder to PM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-12-16T00:00:00.000Z",
+  "versionId": "1"
+}
